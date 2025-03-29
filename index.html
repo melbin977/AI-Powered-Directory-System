@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Directory Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-center mb-8 text-gray-800">Directory Analyzer</h1>
+        
+        <!-- Input Section -->
+        <div class="max-w-2xl mx-auto mb-8">
+            <div class="flex gap-4">
+                <input 
+                    v-model="directory" 
+                    @keyup.enter="analyzeDirectory"
+                    type="text" 
+                    placeholder="Enter directory path (e.g., C:\Users\Documents)"
+                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                <button 
+                    @click="analyzeDirectory"
+                    :disabled="isLoading"
+                    class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                >
+                    [[ isLoading ? 'Analyzing...' : 'Analyze' ]]
+                </button>
+            </div>
+            
+            <!-- Loading State -->
+            <div v-if="isLoading" class="mt-4 text-center text-gray-600">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                <p class="mt-2">Analyzing directory structure...</p>
+            </div>
+            
+            <!-- Error Message -->
+            <div v-if="error" class="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                <p class="font-bold">Error:</p>
+                <p>[[ error ]]</p>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div v-if="!isLoading && !error && totalFiles > 0" class="space-y-8">
+            <!-- Summary -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-xl font-semibold mb-4 text-gray-800">Summary</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <p class="text-sm text-gray-600">Total Files</p>
+                        <p class="text-2xl font-bold text-gray-800">[[ totalFiles ]]</p>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <p class="text-sm text-gray-600">Total Size</p>
+                        <p class="text-2xl font-bold text-gray-800">[[ formatSize(totalSize) ]]</p>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <p class="text-sm text-gray-600">Categories</p>
+                        <p class="text-2xl font-bold text-gray-800">[[ Object.keys(categories).length ]]</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Duplicate Files Section -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">Duplicate Files</h2>
+                    <button 
+                        @click="findDuplicates"
+                        :disabled="isLoadingDuplicates"
+                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    >
+                        [[ isLoadingDuplicates ? 'Scanning...' : 'Scan for Duplicates' ]]
+                    </button>
+                </div>
+                
+                <!-- Loading State for Duplicates -->
+                <div v-if="isLoadingDuplicates" class="text-center text-gray-600">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                    <p class="mt-2">Scanning for duplicate files...</p>
+                </div>
+
+                <!-- Duplicate Files List -->
+                <div v-if="!isLoadingDuplicates && duplicates.length > 0" class="space-y-4">
+                    <div v-for="(duplicate, index) in duplicates" :key="index" class="border rounded-lg p-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <h3 class="font-semibold text-gray-700">Original File</h3>
+                                <p class="text-sm text-gray-600">Name: [[ duplicate.original.name ]]</p>
+                                <p class="text-sm text-gray-600">Size: [[ formatSize(duplicate.original.size) ]]</p>
+                                <p class="text-sm text-gray-600">Modified: [[ duplicate.original.modified ]]</p>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-700">Duplicate File</h3>
+                                <p class="text-sm text-gray-600">Name: [[ duplicate.duplicate.name ]]</p>
+                                <p class="text-sm text-gray-600">Size: [[ formatSize(duplicate.duplicate.size) ]]</p>
+                                <p class="text-sm text-gray-600">Modified: [[ duplicate.duplicate.modified ]]</p>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex justify-end">
+                            <button 
+                                @click="deleteDuplicate(duplicate.duplicate.path)"
+                                class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500"
+                            >
+                                Delete Duplicate
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- No Duplicates Message -->
+                <div v-if="!isLoadingDuplicates && duplicates.length === 0" class="text-center text-gray-600">
+                    <p>No duplicate files found.</p>
+                </div>
+            </div>
+
+            <!-- Categories -->
+            <div v-for="(files, category) in categories" :key="category" class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-xl font-semibold mb-4 text-gray-800">[[ category ]]</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Modified</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <tr v-for="file in files" :key="file.path" class="hover:bg-gray-50 cursor-pointer" @click="openFile(file)">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">[[ file.name ]]</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">[[ file.type ]]</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">[[ formatSize(file.size) ]]</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">[[ file.modified ]]</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- No Files Message -->
+        <div v-if="!isLoading && !error && totalFiles === 0" class="text-center text-gray-600 mt-8">
+            <p class="text-lg">No files found in the specified directory.</p>
+            <p class="text-sm mt-2">Please check if the directory path is correct and contains files.</p>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue
+
+        createApp({
+            delimiters: ['[[', ']]'],
+            data() {
+                return {
+                    directory: '',
+                    files: [],
+                    categories: {
+                        'Documents': [],
+                        'Images': [],
+                        'Videos': [],
+                        'Audio': [],
+                        'Archives': [],
+                        'Others': []
+                    },
+                    isLoading: false,
+                    isLoadingDuplicates: false,
+                    error: null,
+                    totalFiles: 0,
+                    totalSize: 0,
+                    duplicates: []
+                }
+            },
+            methods: {
+                async analyzeDirectory() {
+                    if (!this.directory) {
+                        this.error = 'Please enter a directory path'
+                        return
+                    }
+
+                    this.isLoading = true
+                    this.error = null
+                    this.files = []
+                    this.categories = {
+                        'Documents': [],
+                        'Images': [],
+                        'Videos': [],
+                        'Audio': [],
+                        'Archives': [],
+                        'Others': []
+                    }
+                    this.totalFiles = 0
+                    this.totalSize = 0
+
+                    try {
+                        const response = await fetch('/api/analyze', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({ directory: this.directory })
+                        })
+
+                        if (!response.ok) {
+                            const errorData = await response.json()
+                            throw new Error(errorData.error || 'Failed to analyze directory')
+                        }
+
+                        const data = await response.json()
+                        this.files = data.files
+                        this.categories = data.categories
+                        this.totalFiles = this.files.length
+                        this.totalSize = this.files.reduce((sum, file) => sum + file.size, 0)
+                    } catch (err) {
+                        console.error('Error:', err)
+                        this.error = err.message
+                    } finally {
+                        this.isLoading = false
+                    }
+                },
+                formatSize(bytes) {
+                    if (bytes === 0) return '0 Bytes'
+                    const k = 1024
+                    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
+                    const i = Math.floor(Math.log(bytes) / Math.log(k))
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+                },
+                openFile(file) {
+                    // Create a temporary link element
+                    const link = document.createElement('a');
+                    link.href = `/api/file/${encodeURIComponent(file.path)}`;
+                    link.target = '_blank';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                },
+                async findDuplicates() {
+                    if (!this.directory) {
+                        this.error = 'Please enter a directory path'
+                        return
+                    }
+
+                    this.isLoadingDuplicates = true
+                    this.duplicates = []
+
+                    try {
+                        const response = await fetch('/api/duplicates', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({ directory: this.directory })
+                        })
+
+                        if (!response.ok) {
+                            const errorData = await response.json()
+                            throw new Error(errorData.error || 'Failed to find duplicates')
+                        }
+
+                        const data = await response.json()
+                        this.duplicates = data.duplicates
+                    } catch (err) {
+                        console.error('Error:', err)
+                        this.error = err.message
+                    } finally {
+                        this.isLoadingDuplicates = false
+                    }
+                },
+                async deleteDuplicate(filePath) {
+                    if (!confirm('Are you sure you want to delete this duplicate file?')) {
+                        return
+                    }
+
+                    try {
+                        const response = await fetch('/api/delete-duplicate', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({ file_path: filePath })
+                        })
+
+                        if (!response.ok) {
+                            const errorData = await response.json()
+                            throw new Error(errorData.error || 'Failed to delete file')
+                        }
+
+                        // Remove the deleted duplicate from the list
+                        this.duplicates = this.duplicates.filter(d => d.duplicate.path !== filePath)
+                        
+                        // Refresh the file list
+                        await this.analyzeDirectory()
+                    } catch (err) {
+                        console.error('Error:', err)
+                        this.error = err.message
+                    }
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html> 
